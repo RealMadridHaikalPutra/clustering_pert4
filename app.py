@@ -1,16 +1,17 @@
 """
-app.py — Deployment Streamlit dari notebook CRISP-DM (satu file)
-----------------------------------------------------------------
-Aplikasi ini menampilkan seluruh proses pada notebook
-51423260_REAL MADRID HAIKAL PUTRA_KELAS F.ipynb (Fase 1 s.d. Fase 5)
-tanpa menambahkan proses di luar notebook.
+app.py — Aplikasi Streamlit (Deployment) CRISP-DM K-Means Clustering
+--------------------------------------------------------------------
+Menampilkan seluruh proses pada notebook
+51423260_REAL MADRID HAIKAL PUTRA_KELAS F.ipynb (Fase 1 s.d. Fase 5).
 
-Seluruh kode notebook — termasuk kode pemodelan (Fase 3 s.d. Fase 5) —
-berada di file ini. Secara default scaler & model dimuat dari artefak:
-    - scaler.pkl
-    - kmeans_model.pkl
-Bila artefak tersebut belum ada, aplikasi akan melatih model otomatis
-dari dataset (kode yang sama dengan notebook) lalu menyimpannya.
+Kode pemodelan (training) sudah DIPISAH ke `train_model.py`. Aplikasi ini
+memuat artefak hasil pelatihan (`scaler.pkl`, `kmeans_model.pkl`,
+`cluster_summary.csv`) dan menggunakannya untuk segmentasi pelanggan.
+
+Fitur interaktif untuk pengguna:
+    1. Input Manual  — masukkan nilai fitur secara langsung
+    2. Upload CSV    — unggah data pelanggan untuk diprediksi
+    3. Latih Ulang   — latih ulang model dari Customer_Transactions.csv
 
 Cara menjalankan:
     streamlit run app.py
@@ -22,87 +23,57 @@ import os
 # Silencing warning joblib/loky "Could not find the number of physical cores" (Windows).
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))
 
-import joblib
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
-from sklearn.preprocessing import StandardScaler
+import train_model
+from train_model import FEATURES
 
 # --- Import & pengaturan gaya plot (notebook: sel [8]) ---
 sns.set(style="whitegrid")
 
 st.set_page_config(page_title="Segmentasi Pelanggan - K-Means", layout="wide")
 
+if "model_version" not in st.session_state:
+    st.session_state.model_version = 0
+
+VERSION = st.session_state.model_version
+
 
 # ---------------------------------------------------------
-# Memuat data & artefak model
+# Memuat data & artefak model (di-cache dengan versi)
 # ---------------------------------------------------------
-@st.cache_data
-def load_dataset():
+@st.cache_data(show_spinner=False)
+def load_dataset(version):
     # notebook: sel [10]
-    return pd.read_csv("Customer_Transactions.csv")
+    return train_model.load_dataset()
 
 
-FEATURES = ["annual_income", "spending_score", "num_purchases"]
-K_OPTIMAL = 4
+@st.cache_resource(show_spinner=False)
+def load_artifacts(version):
+    # Memuat scaler & model; melatih ulang otomatis bila artefak belum ada.
+    return train_model.load_artifacts()
 
 
-@st.cache_resource
-def load_artifacts(_X):
-    # Utamakan artefak .pkl bila tersedia (hasil pemodelan notebook).
-    if os.path.exists("scaler.pkl") and os.path.exists("kmeans_model.pkl"):
-        scaler = joblib.load("scaler.pkl")
-        return scaler, joblib.load("kmeans_model.pkl")
-
-    # Cadangan: latih dari dataset memakai kode yang sama dengan notebook.
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(_X)
-
-    # Elbow Method (notebook: sel [24])
-    for k in range(1, 11):
-        KMeans(n_clusters=k, init="k-means++", random_state=42, n_init=10).fit(X_scaled)
-
-    # Silhouette Score (notebook: sel [26])
-    for k in range(2, 11):
-        labels = KMeans(n_clusters=k, init="k-means++", random_state=42, n_init=10).fit_predict(X_scaled)
-        silhouette_score(X_scaled, labels)
-
-    # Melatih model K-Means (notebook: sel [30])
-    model = KMeans(n_clusters=K_OPTIMAL, init="k-means++", random_state=42, n_init=10)
-    model.fit(X_scaled)
-
-    joblib.dump(scaler, "scaler.pkl")
-    joblib.dump(model, "kmeans_model.pkl")
-    return scaler, model
+@st.cache_data(show_spinner=False)
+def load_cluster_summary(version):
+    if os.path.exists(train_model.SUMMARY_PATH):
+        return pd.read_csv(train_model.SUMMARY_PATH, index_col="Cluster")
+    return None
 
 
-@st.cache_data
-def elbow_analysis(X_scaled):
+@st.cache_data(show_spinner=False)
+def elbow_analysis_cached(X_scaled):
     # notebook: sel [24]
-    inertia = []
-    K_range = list(range(1, 11))
-    for k in K_range:
-        kmeans = KMeans(n_clusters=k, init="k-means++", random_state=42, n_init=10)
-        kmeans.fit(X_scaled)
-        inertia.append(kmeans.inertia_)
-    return K_range, inertia
+    return train_model.elbow_analysis(X_scaled)
 
 
-@st.cache_data
-def silhouette_analysis(X_scaled):
+@st.cache_data(show_spinner=False)
+def silhouette_analysis_cached(X_scaled):
     # notebook: sel [26]
-    silhouette_scores = []
-    K_range_sil = list(range(2, 11))
-    for k in K_range_sil:
-        kmeans = KMeans(n_clusters=k, init="k-means++", random_state=42, n_init=10)
-        labels = kmeans.fit_predict(X_scaled)
-        silhouette_scores.append(silhouette_score(X_scaled, labels))
-    return K_range_sil, silhouette_scores
+    return train_model.silhouette_analysis(X_scaled)
 
 
 # =========================================================
@@ -162,7 +133,7 @@ st.markdown(
     "dan karakteristik data sebelum diproses lebih lanjut."
 )
 
-df = load_dataset()
+df = load_dataset(VERSION)
 
 # notebook: sel [10] — memuat dataset
 st.subheader("Memuat Dataset")
@@ -198,8 +169,7 @@ st.markdown(
 
 # notebook: sel [17] — seleksi fitur
 st.subheader("Seleksi Fitur untuk Clustering")
-features = FEATURES
-X = df[features]
+X = train_model.select_features(df)
 st.dataframe(X.head(), use_container_width=True)
 
 # notebook: sel [20] — standardisasi data
@@ -210,7 +180,7 @@ st.markdown(
     "nilai yang lebih besar."
 )
 
-scaler, model = load_artifacts(X)
+scaler, model = load_artifacts(VERSION)
 X_scaled = scaler.transform(X)
 st.write(X_scaled[:5])
 
@@ -225,7 +195,7 @@ st.markdown(
 
 # notebook: sel [24] — Elbow Method
 st.subheader("Menentukan Jumlah Cluster Optimal — Elbow Method")
-K_range, inertia = elbow_analysis(X_scaled)
+K_range, inertia = elbow_analysis_cached(X_scaled)
 fig, ax = plt.subplots(figsize=(8, 5))
 ax.plot(K_range, inertia, marker="o")
 ax.set_xlabel("Jumlah Cluster (k)")
@@ -236,7 +206,7 @@ st.pyplot(fig)
 
 # notebook: sel [26] — Silhouette Score
 st.subheader("Silhouette Score")
-K_range_sil, silhouette_scores = silhouette_analysis(X_scaled)
+K_range_sil, silhouette_scores = silhouette_analysis_cached(X_scaled)
 fig, ax = plt.subplots(figsize=(8, 5))
 ax.plot(K_range_sil, silhouette_scores, marker="o", color="green")
 ax.set_xlabel("Jumlah Cluster (k)")
@@ -262,25 +232,29 @@ st.markdown(
     "dipilih untuk proses selanjutnya adalah **k = 4**."
 )
 
-# notebook: sel [30] — melatih model K-Means
-st.subheader("Melatih Model K-Means (k = 4)")
-df["Cluster"] = model.predict(X_scaled)
-st.dataframe(df.head(), use_container_width=True)
+# notebook: sel [30] — melatih model K-Means (memakai model hasil train_model.py)
+st.subheader(f"Melatih Model K-Means (k = {model.n_clusters})")
+df_clustered = df.copy()
+df_clustered["Cluster"] = model.predict(X_scaled)
+st.dataframe(df_clustered.head(), use_container_width=True)
 
 # notebook: sel [31] — Silhouette Score model final
-k_optimal = K_OPTIMAL
-final_score = silhouette_score(X_scaled, df["Cluster"])
-st.write(f"Silhouette Score (k={k_optimal}) : {final_score:.4f}")
+final_score = silhouette_scores[model.n_clusters - 2] if model.n_clusters >= 2 else None
+st.write(
+    f"Silhouette Score (k={model.n_clusters}) : {final_score:.4f}"
+    if final_score is not None
+    else "Silhouette Score tidak tersedia."
+)
 
 # notebook: sel [32] — jumlah pelanggan tiap cluster
 st.write("Jumlah pelanggan pada masing-masing cluster:")
-st.write(df["Cluster"].value_counts().sort_index())
+st.write(df_clustered["Cluster"].value_counts().sort_index())
 
 # notebook: sel [34] — visualisasi scatter
 st.subheader("Visualisasi Hasil Clustering")
 fig, ax = plt.subplots(figsize=(8, 6))
 sns.scatterplot(
-    data=df,
+    data=df_clustered,
     x="annual_income",
     y="spending_score",
     hue="Cluster",
@@ -295,7 +269,7 @@ ax.legend(title="Cluster")
 st.pyplot(fig)
 
 # notebook: sel [35] — pairplot
-g = sns.pairplot(df, vars=features, hue="Cluster", palette="viridis")
+g = sns.pairplot(df_clustered, vars=FEATURES, hue="Cluster", palette="viridis")
 st.pyplot(g.fig)
 
 # =========================================================
@@ -310,7 +284,7 @@ st.markdown(
 
 # notebook: sel [38] — karakteristik masing-masing cluster
 st.subheader("Karakteristik Masing-Masing Cluster")
-cluster_summary = df.groupby("Cluster")[features].mean().round(2)
+cluster_summary = df_clustered.groupby("Cluster")[FEATURES].mean().round(2)
 st.dataframe(cluster_summary, use_container_width=True)
 
 # notebook: sel [39] — visualisasi karakteristik rata-rata tiap cluster
@@ -363,3 +337,112 @@ st.markdown(
     "karakteristik antar cluster (lihat tabel `cluster_summary`) masih cukup jelas terlihat "
     "dan dapat diinterpretasikan secara bisnis."
 )
+
+# =========================================================
+# FASE 6 — INTERAKTIF: SEGMENTASI PELANGGAN BARU
+# =========================================================
+st.header("🟣 Segmentasi Pelanggan Baru")
+st.markdown(
+    "Gunakan model yang telah dilatih untuk menentukan segmen pelanggan baru. "
+    "Pilih salah satu metode di bawah ini."
+)
+
+summary_ref = load_cluster_summary(VERSION)
+
+
+def show_prediction(result_df):
+    """Menampilkan ringkasan hasil prediksi cluster."""
+    counts = result_df["Cluster"].value_counts().sort_index()
+    st.write("Jumlah data per cluster:")
+    st.write(counts)
+
+
+tab_input, tab_upload, tab_retrain = st.tabs(
+    ["✍️ Input Manual", "📁 Upload CSV", "🔄 Latih Ulang Model"]
+)
+
+# --- Tab 1: Input Manual -------------------------------------------------
+with tab_input:
+    st.subheader("Masukkan Data Pelanggan")
+    with st.form("form_input_manual"):
+        col1, col2, col3 = st.columns(3)
+        annual_income = col1.number_input(
+            "Annual Income", min_value=0.0, value=70000.0, step=1000.0
+        )
+        spending_score = col2.number_input(
+            "Spending Score", min_value=0.0, value=50.0, step=1.0
+        )
+        num_purchases = col3.number_input(
+            "Number of Purchases", min_value=0.0, value=20.0, step=1.0
+        )
+        submitted = st.form_submit_button("Prediksi Cluster")
+
+    if submitted:
+        input_df = pd.DataFrame(
+            [
+                {
+                    "annual_income": annual_income,
+                    "spending_score": spending_score,
+                    "num_purchases": num_purchases,
+                }
+            ]
+        )
+        result = train_model.predict(input_df, scaler=scaler, model=model)
+        cluster = int(result["Cluster"].iloc[0])
+        st.success(f"Pelanggan berada pada **Cluster {cluster}** 🎯")
+        st.dataframe(result, use_container_width=True)
+
+        if summary_ref is not None and cluster in summary_ref.index:
+            st.markdown("**Karakteristik rata-rata Cluster ini:**")
+            st.dataframe(summary_ref.loc[[cluster]], use_container_width=True)
+
+# --- Tab 2: Upload CSV ---------------------------------------------------
+with tab_upload:
+    st.subheader("Unggah Data Pelanggan (CSV)")
+    st.caption(
+        "File CSV harus memuat kolom: " + ", ".join(f"`{f}`" for f in FEATURES)
+    )
+    uploaded_file = st.file_uploader("Pilih file CSV", type=["csv"])
+
+    if uploaded_file is not None:
+        upload_df = pd.read_csv(uploaded_file)
+        missing = [f for f in FEATURES if f not in upload_df.columns]
+        if missing:
+            st.error("Kolom berikut tidak ditemukan: " + ", ".join(missing))
+        else:
+            st.markdown("**Pratinjau data:**")
+            st.dataframe(upload_df.head(), use_container_width=True)
+
+            result = train_model.predict(upload_df, scaler=scaler, model=model)
+            st.markdown("**Hasil segmentasi:**")
+            st.dataframe(result, use_container_width=True)
+            show_prediction(result)
+
+            st.download_button(
+                "⬇️ Unduh hasil (CSV)",
+                data=result.to_csv(index=False).encode("utf-8"),
+                file_name="hasil_segmentasi.csv",
+                mime="text/csv",
+            )
+
+# --- Tab 3: Latih Ulang Model -------------------------------------------
+with tab_retrain:
+    st.subheader("Latih Ulang Model dari Dataset")
+    st.markdown(
+        "Melatih ulang model K-Means menggunakan dataset yang tersedia "
+        f"(`{train_model.DATASET_PATH}`, {len(df):,} baris). "
+        "Artefak `scaler.pkl`, `kmeans_model.pkl`, dan `cluster_summary.csv` akan "
+        "diperbarui."
+    )
+    st.caption(f"Jumlah cluster (k) tetap = {train_model.K_OPTIMAL}.")
+
+    if st.button("🔄 Latih Ulang Sekarang"):
+        with st.spinner("Melatih ulang model..."):
+            _, _, metrics = train_model.train_and_save()
+        st.session_state.model_version += 1
+        st.success(
+            "Pelatihan ulang selesai! "
+            f"Silhouette Score = {metrics['silhouette_score']:.4f} · "
+            f"{metrics['n_samples']:,} sampel · k = {metrics['n_clusters']}."
+        )
+        st.rerun()

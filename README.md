@@ -7,20 +7,50 @@ menggunakan **Streamlit**.
 Aplikasi menampilkan **seluruh proses CRISP-DM** pada notebook (Fase 1 Business
 Understanding s.d. Fase 5 Evaluation) tanpa menambahkan proses di luar notebook.
 
+Kode **pelatihan model sudah dipisahkan** dari aplikasi: pelatihan ada di
+`train_model.py`, sedangkan `app.py` hanya memuat artefak hasil pelatihan dan
+menampilkan proses CRISP-DM beserta fitur segmentasi pelanggan baru.
+
 ## Isi Folder
 
 | File | Fungsi |
 |---|---|
-| `app.py` | **Satu file** aplikasi Streamlit + seluruh sel notebook & kode pemodelan (EDA, Elbow, Silhouette, clustering, evaluasi) |
+| `app.py` | Aplikasi Streamlit (UI CRISP-DM + segmentasi pelanggan baru) |
+| `train_model.py` | **Modul pelatihan model** (pemodelan notebook: EDA fitur, Elbow, Silhouette, K-Means, evaluasi) & penyimpanan artefak |
 | `requirements.txt` | Daftar dependency Python yang dibutuhkan |
 | `scaler.pkl` | `StandardScaler` yang sudah di-*fit* |
 | `kmeans_model.pkl` | Model `KMeans` (k=4) yang sudah dilatih |
 | `cluster_summary.csv` | Rata-rata fitur per cluster |
 | `Customer_Transactions.csv` | Dataset (untuk menjalankan aplikasi / latih ulang) |
 
-Seluruh kode pemodelan sudah menyatu di dalam `app.py`. Secara default model
-dimuat dari `scaler.pkl` & `kmeans_model.pkl`; bila file tersebut tidak ada,
-`app.py` otomatis melatih ulang dari dataset lalu menyimpannya kembali.
+Model dimuat dari `scaler.pkl` & `kmeans_model.pkl`; bila file tersebut tidak
+ada, aplikasi otomatis melatih dari dataset lalu menyimpannya kembali.
+
+## Fitur Interaktif (Segmentasi Pelanggan Baru)
+
+Pada bagian **Segmentasi Pelanggan Baru**, pengguna dapat memilih salah satu:
+
+1. **✍️ Input Manual** — memasukkan nilai `annual_income`, `spending_score`, dan
+   `num_purchases` secara langsung, lalu melihat cluster hasil prediksi.
+2. **📁 Upload CSV** — mengunggah file CSV yang memuat ketiga kolom fitur di atas;
+   aplikasi memprediksi cluster setiap baris dan menyediakan unduhan hasil.
+3. **🔄 Latih Ulang Model** — melatih ulang model dari `Customer_Transactions.csv`
+   langsung dari antarmuka (memperbarui `scaler.pkl`, `kmeans_model.pkl`, dan
+   `cluster_summary.csv`).
+
+---
+
+## 0. Melatih Model dari Terminal (opsional)
+
+Untuk melatih ulang model secara mandiri tanpa membuka aplikasi:
+
+```bash
+python train_model.py
+```
+
+Perintah ini memuat `Customer_Transactions.csv`, melatih `StandardScaler` +
+`KMeans(n_clusters=4)`, lalu menulis ulang `scaler.pkl`, `kmeans_model.pkl`, dan
+`cluster_summary.csv`.
 
 Fitur: `annual_income`, `spending_score`, `num_purchases` ·
 `StandardScaler` · `KMeans(n_clusters=4, random_state=42, n_init=10)` ·
@@ -47,7 +77,7 @@ saat dijalankan lalu menyimpan artefak baru.
 
 1. **Buat repository GitHub baru** (public), misalnya `customer-segmentation-kmeans`.
 2. **Upload semua file** dalam folder ini ke repository tersebut:
-   `app.py`, `requirements.txt`, `scaler.pkl`,
+   `app.py`, `train_model.py`, `requirements.txt`, `scaler.pkl`,
    `kmeans_model.pkl`, `cluster_summary.csv`, `Customer_Transactions.csv`.
 3. Buka **https://share.streamlit.io** dan login dengan akun GitHub Anda.
 4. Klik **"New app"**, lalu pilih:
